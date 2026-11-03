@@ -20,6 +20,7 @@ except Exception:
 
 from main import solve_chain
 from auth_client import extract_ticket, MIN_TICKET_LEN
+from link_generator import batch_links
 import auth_client as AUTH
 
 app = FastAPI(title="Delta Cardkey", default_response_class=JSONResponse)
@@ -34,12 +35,11 @@ app.add_middleware(
 executor = ThreadPoolExecutor(max_workers=10)
 lock = threading.Lock()
 
-# 缓存：同一 ticket 只求解一次，重复输入直接秒回
 CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".key_cache.json")
 key_cache = {}
-CACHE_TTL = 24 * 3600  #key 24h 内被消耗 缓存设为 24h
+CACHE_TTL = 24 * 3600
 cache_dirty = threading.Event()
-SAVE_DEBOUNCE = 2.0     # 最多每 2s 落盘一次
+SAVE_DEBOUNCE = 2.0
 
 
 def load_cache():
@@ -137,6 +137,18 @@ def run_solves(ticket):
         return key, err, st
     time.sleep(0.3)
     return solo_pass(ticket)
+
+
+@app.get("/generate")
+async def generate(count: int = 1):
+    if count < 1 or count > 50:
+        return {"success": False, "error": "count 必须在 1 到 50 之间", "links": []}
+    try:
+        loop = asyncio.get_running_loop()
+        links = await loop.run_in_executor(executor, batch_links, count)
+        return {"success": True, "links": links}
+    except Exception as e:
+        return {"success": False, "error": f"生成失败: {type(e).__name__}: {e}", "links": []}
 
 
 @app.get("/delta")
