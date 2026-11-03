@@ -133,7 +133,7 @@
     border: 1px solid var(--border); border-radius: 12px; outline: none;
     transition: border-color .25s, box-shadow .25s, background .25s;
   }
-  .field input[type="text"] { padding-right: 84px; }
+  .field input[type="text"] { padding-right: 130px; }
   input::placeholder { color: var(--faint); }
   input:focus { border-color: rgba(91,140,255,.8); box-shadow: 0 0 0 4px rgba(91,140,255,.15); background: rgba(10,13,20,.95); }
   .field-actions { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: flex; gap: 4px; }
@@ -309,6 +309,7 @@
       <input type="text" id="solveInput" placeholder="https://auth.platorelay.com/a?d=..." autocomplete="off" spellcheck="false">
       <div class="field-actions">
         <button class="mini-btn" type="button" onclick="pasteInput()">粘贴</button>
+        <button class="mini-btn" type="button" onclick="clearInput()">清空</button>
       </div>
     </div>
 
@@ -406,14 +407,22 @@ function toast(msg) {
   t._timer = setTimeout(() => t.classList.remove('show'), 1500);
 }
 
+// 优先用 execCommand 同步复制（不会弹出剪贴板授权提示），失败再退回 Clipboard API
 function copyText(text) {
-  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
   return new Promise((resolve, reject) => {
+    const prev = document.activeElement;
     const ta = document.createElement('textarea');
-    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); resolve(); } catch (e) { reject(e); }
+    ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.left = '0'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
     document.body.removeChild(ta);
+    if (prev && prev !== document.body && prev.blur) prev.blur();
+    if (ok) return resolve();
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(resolve, reject);
+    } else reject(new Error('copy failed'));
   });
 }
 const doCopy = v => copyText(v).then(() => toast('已复制')).catch(() => toast('复制失败'));
@@ -435,6 +444,10 @@ async function pasteInput() {
     document.getElementById('solveInput').value = t.trim();
     toast('已粘贴');
   } catch { toast('无法读取剪贴板'); }
+}
+
+function clearInput() {
+  document.getElementById('solveInput').value = '';
 }
 
 function stepCount(d) {
@@ -574,7 +587,6 @@ async function doSolve() {
       addResult('solveResults', { value: data.key, type: 'key', time: data.times || (performance.now() - t0) });
       const input = document.getElementById('solveInput');
       input.value = '';
-      input.focus();
     } else {
       addResult('solveResults', { value: data.error || '未知错误', type: 'error', autoCopy: false });
     }
