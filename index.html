@@ -1,0 +1,26 @@
+<input id="linkInput" placeholder="粘贴 Delta 链接">
+<button onclick="solve()">解出 Key</button>
+<pre id="result"></pre>
+
+<script>
+async function solve() {
+  const url = document.getElementById('linkInput').value;
+  const resultEl = document.getElementById('result');
+  resultEl.textContent = '处理中...';
+
+  // 把 YOUR_APP 换成你 Render 服务的名字
+  const apiUrl = `https://YOUR_APP.onrender.com/delta?url=${encodeURIComponent(url)}`;
+  
+  try {
+    const res = await fetch(apiUrl);
+    const data = await res.json();
+    if (data.key) {
+      resultEl.textContent = `Key: ${data.key}\n用时: ${data.times}`;
+    } else {
+      resultEl.textContent = `失败: ${data.error || '未知错误'}`;
+    }
+  } catch (e) {
+    resultEl.textContent = '请求出错，服务可能正在唤醒，请稍后重试';
+  }
+}
+</script>
