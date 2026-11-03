@@ -11,6 +11,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 try:
     from fastapi.responses import ORJSONResponse as JSONResponse
@@ -22,6 +23,14 @@ from auth_client import extract_ticket, MIN_TICKET_LEN
 import auth_client as AUTH
 
 app = FastAPI(title="Delta Cardkey", default_response_class=JSONResponse)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 executor = ThreadPoolExecutor(max_workers=10)
 lock = threading.Lock()
 
@@ -49,11 +58,6 @@ def load_cache():
 def save_cache_now():
     try:
         with lock:
-            # 落盘前顺手把过期的清掉。
-            #
-            # 以前只在 cache_get 命中时删单条,没被查到的过期条目会一直留在文件里
-            # 越攒越多 —— 实测线上 1413 条里有 808 条（57%）早已过期。读的时候会跳过
-            # 它们所以不影响结果,但文件白白大一倍,看着也像有脏数据。
             now = time.time()
             for h in [h for h, v in key_cache.items()
                       if now - v.get("ts", 0) >= CACHE_TTL]:
@@ -92,7 +96,7 @@ def cache_put(ticket, key, solve_time, h=None):
     h = h or hashlib.md5(ticket.encode()).hexdigest()
     with lock:
         key_cache[h] = {"key": key, "ts": time.time(), "solve_time": solve_time}
-    cache_dirty.set()      # 交给后台线程合并 不阻塞当前请求
+    cache_dirty.set()
 
 
 load_cache()
@@ -100,7 +104,7 @@ threading.Thread(target=cache_writer_loop, daemon=True).start()
 
 MADE_BY = "Hasl_Team"
 QQ_GROUP = "277707901"
-inflight = {}              
+inflight = {}
 
 def fmt_t(secs):
     return f"{round(float(secs or 0.0), 12)}s"
@@ -145,10 +149,6 @@ async def delta(url: str):
         return {"key": None, "error": "invalid url", "cached": False,
                 "made_by": MADE_BY, "qq_group": QQ_GROUP,
                 "times": fmt_t(time.time() - t0)}
-    # 长度不够的在这里就挡掉,别进求解流程。
-    #
-    # 求解一趟要 5 秒以上,而这种链接注定失败 —— 早点说清楚比让人等着强,顺带也省掉
-    # 一次没意义的自动重试和一个白烧的验证码 token。
     if len(ticket) < MIN_TICKET_LEN:
         return {"key": None, "error": "invalid url (no ticket)", "cached": False,
                 "made_by": MADE_BY, "qq_group": QQ_GROUP,
@@ -204,9 +204,6 @@ if __name__ == "__main__":
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--workers", "-w", type=int, default=10)
     args = ap.parse_args()
-    # 后台盯上游客户端版本：启动刷一次，之后每小时一次。
-    # Watch the far end's client version in the background: once at startup,
-    # then hourly.
     AUTH.start_version_watcher()
     try:
         import resource
