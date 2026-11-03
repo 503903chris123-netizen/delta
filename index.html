@@ -572,6 +572,9 @@ async function doSolve() {
     const data = await res.json();
     if (data.key) {
       addResult('solveResults', { value: data.key, type: 'key', time: data.times || (performance.now() - t0) });
+      const input = document.getElementById('solveInput');
+      input.value = '';
+      input.focus();
     } else {
       addResult('solveResults', { value: data.error || '未知错误', type: 'error', autoCopy: false });
     }
