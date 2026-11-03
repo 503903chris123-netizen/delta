@@ -241,6 +241,22 @@
   .icon-btn:hover { background: rgba(91,140,255,.2); border-color: rgba(91,140,255,.4); color: #fff; transform: scale(1.07); }
   .icon-btn:active { transform: scale(.92); }
 
+  .group { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 15px;
+    background: rgba(255,255,255,.025); border: 1px solid var(--border); animation: slideIn .35s var(--ease); }
+  .group .result-item { animation: none; background: rgba(6,8,13,.7); }
+  .group-head { display: flex; justify-content: space-between; align-items: center; padding: 0 4px 2px;
+    font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .group-head .total { font-family: var(--mono); color: var(--muted); }
+  .pending { opacity: .75; }
+  .pending .value { color: var(--muted) !important; font-family: inherit; cursor: default; }
+  .pending .badge { color: var(--muted) !important; background: rgba(255,255,255,.06) !important; }
+  .pending::before { background: linear-gradient(180deg, var(--accent), var(--accent-2)) !important; animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .summary { margin-top: 12px; padding: 10px 14px; border-radius: 12px; font-size: 12px; color: var(--muted);
+    background: rgba(91,140,255,.07); border: 1px solid rgba(91,140,255,.2); display: none;
+    justify-content: space-between; gap: 10px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+  .summary.show { display: flex; animation: fade .35s var(--ease); }
+  .summary b { color: var(--text); font-family: var(--mono); font-weight: 600; }
   .empty { text-align: center; color: var(--faint); font-size: 12.5px; padding: 30px 0; border: 1px dashed var(--border); border-radius: 12px; }
   .hint { font-size: 11.5px; color: var(--faint); text-align: center; margin-top: 22px; line-height: 1.7; }
 
@@ -348,6 +364,7 @@
       </div>
     </div>
     <div class="result-list" id="genResults"><div class="empty">还没有结果</div></div>
+    <div class="summary" id="genSummary"></div>
   </section>
 
   <div class="hint">完成上方验证码后按钮可用 · 点击内容可复制 · 结果自动复制</div>
@@ -436,13 +453,32 @@ document.getElementById('solveInput').addEventListener('keydown', e => {
 /* Results */
 const BADGE = { key: 'Key', link: 'Link', error: 'Error' };
 
-function addResult(containerId, { value, type, time = null, autoCopy = true }) {
+function fmtMs(ms) { return ms < 1000 ? Math.round(ms) + 'ms' : (ms / 1000).toFixed(2) + 's'; }
+function normTime(t) { return typeof t === 'number' ? fmtMs(t) : t; }
+
+function addGroup(containerId, idx, total) {
   const container = document.getElementById(containerId);
   const empty = container.querySelector('.empty');
   if (empty) empty.remove();
+  const g = document.createElement('div');
+  g.className = 'group';
+  const head = document.createElement('div');
+  head.className = 'group-head';
+  head.innerHTML = '<span>#' + idx + ' / ' + total + '</span><span class="total"></span>';
+  g.appendChild(head);
+  container.appendChild(g);
+  container.scrollTop = container.scrollHeight;
+  return g;
+}
+
+function addResult(containerId, { value, type, time = null, autoCopy = true, parent = null, pending = false }) {
+  const container = document.getElementById(containerId);
+  const empty = container.querySelector('.empty');
+  if (empty) empty.remove();
+  time = normTime(time);
 
   const item = document.createElement('div');
-  item.className = 'result-item t-' + type;
+  item.className = 'result-item t-' + type + (pending ? ' pending' : '');
 
   const badge = document.createElement('span');
   badge.className = 'badge';
@@ -466,7 +502,9 @@ function addResult(containerId, { value, type, time = null, autoCopy = true }) {
   clearBtn.onclick = () => {
     item.classList.add('removing');
     setTimeout(() => {
+      const grp = item.closest('.group');
       item.remove();
+      if (grp && !grp.querySelector('.result-item')) grp.remove();
       if (!container.querySelector('.result-item')) container.innerHTML = EMPTY_HTML;
       updateCount(containerId);
     }, 250);
@@ -481,11 +519,30 @@ function addResult(containerId, { value, type, time = null, autoCopy = true }) {
     item.append(sep, tt);
   }
   item.appendChild(actions);
-  container.appendChild(item);
+  (parent || container).appendChild(item);
   container.scrollTop = container.scrollHeight;
   updateCount(containerId);
 
-  if (autoCopy && value) copyText(value).then(() => toast('已复制')).catch(() => {});
+  if (autoCopy && value && !pending) copyText(value).then(() => toast('已复制')).catch(() => {});
+  return item;
+}
+
+/* 把"求解中"占位项替换为最终结果 */
+function resolveItem(item, { value, type, time = null }) {
+  time = normTime(time);
+  item.classList.remove('pending', 't-key', 't-link', 't-error');
+  item.classList.add('t-' + type);
+  item.querySelector('.badge').textContent = BADGE[type] || type;
+  const v = item.querySelector('.value');
+  v.textContent = value; v.title = value; v.onclick = () => doCopy(value);
+  item.querySelectorAll('.icon-btn')[0].onclick = () => doCopy(value);
+  if (time) {
+    const sep = document.createElement('span'); sep.className = 'sep';
+    const tt = document.createElement('span'); tt.className = 'time-tag'; tt.textContent = time;
+    item.insertBefore(sep, item.querySelector('.actions'));
+    item.insertBefore(tt, item.querySelector('.actions'));
+  }
+  if (type === 'key') copyText(value).then(() => toast('已复制')).catch(() => {});
 }
 
 function clearResults(containerId) {
@@ -508,17 +565,20 @@ async function doSolve() {
   const btn = document.getElementById('solveBtn');
   setLoading(btn, true, '解析中…');
 
+  const t0 = performance.now();
+  const tick = setInterval(() => { btn.querySelector('.label').textContent = '解析中 ' + ((performance.now() - t0) / 1000).toFixed(1) + 's'; }, 100);
   try {
     const res = await fetch(`${API_BASE}/delta?url=${encodeURIComponent(url)}`);
     const data = await res.json();
     if (data.key) {
-      addResult('solveResults', { value: data.key, type: 'key', time: data.times || null });
+      addResult('solveResults', { value: data.key, type: 'key', time: data.times || (performance.now() - t0) });
     } else {
       addResult('solveResults', { value: data.error || '未知错误', type: 'error', autoCopy: false });
     }
   } catch (e) {
     addResult('solveResults', { value: '请求出错: ' + e.message, type: 'error', autoCopy: false });
   } finally {
+    clearInterval(tick);
     setLoading(btn, false, '解出 Key');
   }
 }
@@ -529,41 +589,82 @@ async function doGenerate() {
   if (!turnstileToken) { toast('请先完成验证码'); return; }
 
   const btn = document.getElementById('genBtn');
+  const label = btn.querySelector('.label');
+  const summary = document.getElementById('genSummary');
+  summary.classList.remove('show');
   setLoading(btn, true, '生成中…');
 
+  const T0 = performance.now();
+  let phase = '生成中', prog = '';
+  const tick = setInterval(() => {
+    label.textContent = phase + prog + ' · ' + ((performance.now() - T0) / 1000).toFixed(1) + 's';
+  }, 100);
+
+  let okKeys = 0, fail = 0, linkCount = 0, genMs = 0;
+
   try {
+    const g0 = performance.now();
     const gen = await fetch(`${API_BASE}/generate?count=${count}`);
     const genData = await gen.json();
+    genMs = performance.now() - g0;
 
     if (!genData.success || !genData.links) {
       addResult('genResults', { value: genData.error || '生成失败', type: 'error', autoCopy: false });
       return;
     }
 
-    const total = genData.links.length;
+    const links = genData.links;
+    linkCount = links.length;
+    const perLink = genMs / Math.max(1, linkCount);
     let i = 0;
-    for (const link of genData.links) {
-      i++;
-      addResult('genResults', { value: link, type: 'link' });
 
-      if (autoSolve) {
-        btn.querySelector('.label').textContent = `求解中 ${i}/${total}…`;
-        try {
-          const res = await fetch(`${API_BASE}/delta?url=${encodeURIComponent(link)}`);
-          const data = await res.json();
-          if (data.key) {
-            addResult('genResults', { value: data.key, type: 'key', time: data.times || null });
-          } else {
-            addResult('genResults', { value: data.error || '求解失败', type: 'error', autoCopy: false });
-          }
-        } catch (e) {
-          addResult('genResults', { value: '求解请求出错: ' + e.message, type: 'error', autoCopy: false });
-        }
+    for (const link of links) {
+      i++;
+
+      if (!autoSolve) {
+        // 只生成：链接平铺显示，带生成耗时
+        addResult('genResults', { value: link, type: 'link', time: perLink });
+        continue;
       }
+
+      // 生成后自动解：链接 + Key 放进同一个框，一一对应
+      const group = addGroup('genResults', i, linkCount);
+      const totalEl = group.querySelector('.total');
+      addResult('genResults', { value: link, type: 'link', time: perLink, parent: group, autoCopy: false });
+
+      phase = '求解中'; prog = ` ${i}/${linkCount}`;
+      const pend = addResult('genResults', { value: '正在求解…', type: 'key', parent: group, pending: true, autoCopy: false });
+      const s0 = performance.now();
+      try {
+        const res = await fetch(`${API_BASE}/delta?url=${encodeURIComponent(link)}`);
+        const data = await res.json();
+        const ms = performance.now() - s0;
+        if (data.key) {
+          okKeys++;
+          resolveItem(pend, { value: data.key, type: 'key', time: data.times || ms });
+        } else {
+          fail++;
+          resolveItem(pend, { value: data.error || '求解失败', type: 'error', time: ms });
+        }
+      } catch (e) {
+        fail++;
+        resolveItem(pend, { value: '求解请求出错: ' + e.message, type: 'error', time: performance.now() - s0 });
+      }
+      totalEl.textContent = '用时 ' + fmtMs(perLink + (performance.now() - s0));
     }
   } catch (e) {
     addResult('genResults', { value: '请求出错: ' + e.message, type: 'error', autoCopy: false });
   } finally {
+    clearInterval(tick);
+    if (linkCount) {
+      const total = performance.now() - T0;
+      summary.innerHTML =
+        `<span>链接 <b>${linkCount}</b></span>` +
+        (autoSolve ? `<span>成功 <b>${okKeys}</b> · 失败 <b>${fail}</b></span>` : '') +
+        `<span>生成耗时 <b>${fmtMs(genMs)}</b></span>` +
+        `<span>总耗时 <b>${fmtMs(total)}</b></span>`;
+      summary.classList.add('show');
+    }
     setLoading(btn, false, '开始');
   }
 }
