@@ -4,78 +4,463 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Delta Bypass</title>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #0f1115; color: #e6e6e6;
+    background: #05060a; color: #e6e6e6;
     display: flex; justify-content: center; align-items: flex-start;
-    min-height: 100vh; padding: 60px 16px;
+    padding: 56px 16px; min-height: 100vh; position: relative; overflow-x: hidden;
   }
+
+  /* ============ 全动态背景 ============ */
+  .scene {
+    position: fixed; inset: 0; z-index: -1; overflow: hidden;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% -10%, rgba(42,109,244,.18), transparent 60%),
+      radial-gradient(ellipse 60% 50% at 90% 110%, rgba(124,58,237,.15), transparent 60%),
+      radial-gradient(ellipse 50% 40% at 0% 80%, rgba(6,182,212,.1), transparent 60%),
+      #05060a;
+  }
+  .scene .orb {
+    position: absolute; border-radius: 50%; filter: blur(100px); opacity: .5;
+    animation: drift 22s ease-in-out infinite;
+    will-change: transform;
+  }
+  .scene .orb1 { width: 500px; height: 500px; background: #2a6df4; top: -160px; left: -120px; }
+  .scene .orb2 { width: 440px; height: 440px; background: #7c3aed; bottom: -180px; right: -100px; animation-delay: -8s; }
+  .scene .orb3 { width: 340px; height: 340px; background: #06b6d4; top: 35%; left: 55%; animation-delay: -15s; opacity: .3; }
+  @keyframes drift {
+    0%, 100% { transform: translate3d(0,0,0) scale(1); }
+    33% { transform: translate3d(40px,-50px,0) scale(1.1); }
+    66% { transform: translate3d(-30px,40px,0) scale(.92); }
+  }
+
+  /* 动态网格 */
+  .scene .grid {
+    position: absolute; inset: -50%;
+    background-image:
+      linear-gradient(rgba(120,160,255,.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120,160,255,.045) 1px, transparent 1px);
+    background-size: 48px 48px;
+    transform: perspective(600px) rotateX(60deg) translateY(0);
+    animation: gridMove 12s linear infinite;
+    mask-image: radial-gradient(circle at 50% 40%, #000 0%, transparent 65%);
+    -webkit-mask-image: radial-gradient(circle at 50% 40%, #000 0%, transparent 65%);
+    opacity: .7;
+  }
+  @keyframes gridMove { to { background-position: 0 48px, 48px 0; } }
+
+  /* 流动光束 */
+  .scene .beam {
+    position: absolute; width: 1px; height: 100%; top: 0;
+    background: linear-gradient(180deg, transparent, rgba(120,160,255,.35), transparent);
+    filter: blur(1px); opacity: .4; animation: beamFlow 8s linear infinite;
+  }
+  .scene .beam.b1 { left: 15%; animation-delay: 0s; }
+  .scene .beam.b2 { left: 50%; animation-delay: -3s; }
+  .scene .beam.b3 { left: 85%; animation-delay: -6s; }
+  @keyframes beamFlow {
+    0% { transform: translateY(-100%); opacity: 0; }
+    20% { opacity: .5; }
+    80% { opacity: .5; }
+    100% { transform: translateY(100%); opacity: 0; }
+  }
+
+  /* ============ 卡片 ============ */
   .card {
-    width: 100%; max-width: 520px;
-    background: #181b22; border: 1px solid #262b36;
-    border-radius: 12px; padding: 28px;
+    width: 100%; max-width: 680px; position: relative;
+    background: rgba(14, 17, 24, 0.55);
+    backdrop-filter: blur(28px) saturate(160%);
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 22px; padding: 36px;
+    box-shadow: 0 40px 100px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.08);
+    animation: cardIn .7s cubic-bezier(.2,.8,.2,1);
   }
-  h1 { font-size: 20px; font-weight: 600; text-align: center; margin-bottom: 24px; }
-  label { display: block; font-size: 12px; color: #9aa4b2; margin-bottom: 6px; }
-  input[type="text"] {
-    width: 100%; padding: 11px 12px; font-size: 14px;
-    background: #12151b; color: #e6e6e6;
-    border: 1px solid #262b36; border-radius: 8px; outline: none;
-    margin-bottom: 14px;
+  @keyframes cardIn {
+    from { opacity: 0; transform: translateY(24px) scale(.97); }
+    to { opacity: 1; transform: none; }
   }
-  input:focus { border-color: #2a6df4; }
-  button {
-    width: 100%; padding: 12px 0; font-size: 14px; font-weight: 600;
-    color: #fff; background: #2a6df4; border: none; border-radius: 8px;
-    cursor: pointer; transition: .15s; margin-bottom: 16px;
+  .card::before {
+    content: ""; position: absolute; inset: -1px; border-radius: 23px; padding: 1px;
+    background: linear-gradient(135deg, rgba(110,162,255,.55), transparent 35%, transparent 65%, rgba(192,132,252,.45));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none;
+    animation: borderGlow 6s ease-in-out infinite;
   }
-  button:hover { background: #1f5ae0; }
-  button:disabled { background: #3a3f4a; cursor: not-allowed; }
-  pre {
-    background: #12151b; border: 1px solid #262b36; border-radius: 8px;
-    padding: 12px; font-size: 12px; line-height: 1.6;
-    white-space: pre-wrap; word-break: break-all;
-    min-height: 60px; color: #b8c0cc;
+  @keyframes borderGlow {
+    0%, 100% { opacity: .7; }
+    50% { opacity: 1; }
+  }
+
+  h1 {
+    font-size: 26px; font-weight: 700; text-align: center;
+    background: linear-gradient(90deg, #6ea2ff, #c084fc, #6ea2ff);
+    background-size: 200% auto;
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    animation: shimmer 5s linear infinite; margin-bottom: 8px; letter-spacing: -.3px;
+  }
+  @keyframes shimmer { to { background-position: 200% center; } }
+  .subtitle { text-align: center; font-size: 12px; color: #6b7380; margin-bottom: 28px; letter-spacing: .4px; }
+
+  /* ============ Tabs ============ */
+  .tabs { display: flex; gap: 8px; margin-bottom: 24px; padding: 5px;
+          background: rgba(8,10,14,.7); border: 1px solid rgba(255,255,255,.06); border-radius: 13px; }
+  .tab {
+    flex: 1; padding: 11px 0; text-align: center; cursor: pointer;
+    font-size: 13px; color: #9aa4b2; border-radius: 10px; transition: all .3s cubic-bezier(.2,.8,.2,1);
+    user-select: none; position: relative; overflow: hidden;
+  }
+  .tab::after {
+    content: ""; position: absolute; inset: 0; border-radius: 10px;
+    background: linear-gradient(135deg, #2a6df4, #7c3aed);
+    opacity: 0; transition: opacity .3s; z-index: -1;
+  }
+  .tab.active { color: #fff; }
+  .tab.active::after { opacity: 1; }
+  .tab.active { box-shadow: 0 6px 22px rgba(42,109,244,.4); }
+  .tab:hover:not(.active) { color: #c0c7d2; background: rgba(255,255,255,.03); }
+
+  .panel { display: none; }
+  .panel.active { display: block; animation: fade .35s cubic-bezier(.2,.8,.2,1); }
+  @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  label { display: block; font-size: 12px; color: #9aa4b2; margin-bottom: 8px; }
+  input[type="text"], input[type="number"] {
+    width: 100%; padding: 14px 16px; font-size: 14px;
+    background: rgba(8,10,14,.8); color: #e6e6e6;
+    border: 1px solid rgba(255,255,255,.08); border-radius: 12px; outline: none;
+    margin-bottom: 16px; transition: all .3s cubic-bezier(.2,.8,.2,1); font-family: inherit;
+  }
+  input::placeholder { color: #4a505c; }
+  input:focus {
+    border-color: rgba(42,109,244,.8); box-shadow: 0 0 0 4px rgba(42,109,244,.15), 0 0 24px rgba(42,109,244,.2);
+    background: rgba(10,14,20,.95); transform: translateY(-1px);
+  }
+  .checkbox-group { display: flex; gap: 18px; margin-bottom: 16px; }
+  .checkbox-group label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #c0c7d2; cursor: pointer; margin: 0; }
+  input[type="checkbox"] { accent-color: #2a6df4; width: 17px; height: 17px; cursor: pointer; transition: transform .2s; }
+  input[type="checkbox"]:hover { transform: scale(1.1); }
+
+  button.primary {
+    width: 100%; padding: 15px 0; font-size: 14px; font-weight: 600;
+    color: #fff; background: linear-gradient(135deg, #2a6df4, #7c3aed);
+    border: none; border-radius: 12px; cursor: pointer; transition: all .3s cubic-bezier(.2,.8,.2,1);
+    margin-bottom: 20px; letter-spacing: .4px; position: relative; overflow: hidden;
+    box-shadow: 0 6px 24px rgba(42,109,244,.25);
+  }
+  button.primary::before {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.25), transparent);
+    transform: translateX(-100%); transition: transform .7s cubic-bezier(.2,.8,.2,1);
+  }
+  button.primary:hover:not(:disabled)::before { transform: translateX(100%); }
+  button.primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 14px 40px rgba(42,109,244,.5); }
+  button.primary:active:not(:disabled) { transform: translateY(0) scale(.99); }
+  button.primary:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
+
+  .cf-turnstile { margin-bottom: 16px; display: flex; justify-content: center; }
+
+  .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .result-header h3 { font-size: 13px; color: #9aa4b2; font-weight: 500; letter-spacing: .3px; }
+  .clear-all {
+    font-size: 11px; color: #f87171; cursor: pointer; background: rgba(248,113,113,.08);
+    border: 1px solid rgba(248,113,113,.25); padding: 5px 13px; border-radius: 8px;
+    transition: all .25s; backdrop-filter: blur(6px);
+  }
+  .clear-all:hover { background: rgba(248,113,113,.2); transform: translateY(-1px); }
+  .clear-all:active { transform: scale(.97); }
+
+  /* ============ 结果列表 ============ */
+  .result-list { display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto; padding-right: 4px; }
+  .result-list::-webkit-scrollbar { width: 5px; }
+  .result-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 3px; }
+  .result-list::-webkit-scrollbar-track { background: transparent; }
+
+  .result-item {
+    display: flex; align-items: center; gap: 11px;
+    background: rgba(8,10,14,.7); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 12px; padding: 12px 14px; font-size: 13px;
+    animation: slideIn .35s cubic-bezier(.2,.8,.2,1);
+    transition: all .3s cubic-bezier(.2,.8,.2,1); position: relative; overflow: hidden;
+  }
+  .result-item::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+    background: linear-gradient(180deg, #2a6df4, #7c3aed);
+    opacity: 0; transition: opacity .3s;
+  }
+  .result-item:hover { border-color: rgba(110,162,255,.3); background: rgba(14,18,26,.9); transform: translateX(3px); }
+  .result-item:hover::before { opacity: 1; }
+  @keyframes slideIn { from { opacity: 0; transform: translateX(-12px) scale(.98); } to { opacity: 1; transform: none; } }
+
+  .result-item.removing { animation: slideOut .25s cubic-bezier(.2,.8,.2,1) forwards; }
+  @keyframes slideOut { to { opacity: 0; transform: translateX(20px) scale(.95); height: 0; padding: 0; margin: 0; border-width: 0; } }
+
+  .result-item .idx {
+    color: #6b7380; font-size: 11px; flex: 0 0 auto;
+    min-width: 20px; text-align: center; font-variant-numeric: tabular-nums;
+  }
+  .result-item .value {
+    flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-family: "SF Mono", "JetBrains Mono", Consolas, monospace; font-size: 12px;
+    cursor: pointer; transition: color .2s;
+  }
+  .result-item .value.key { color: #4ade80; text-shadow: 0 0 14px rgba(74,222,128,.3); }
+  .result-item .value.link { color: #60a5fa; text-shadow: 0 0 14px rgba(96,165,250,.25); }
+  .result-item .value.error { color: #f87171; }
+  .result-item .value:hover { filter: brightness(1.3); }
+
+  .result-item .actions { display: flex; gap: 6px; flex: 0 0 auto; }
+  .icon-btn {
+    width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 8px; cursor: pointer; font-size: 13px; transition: all .25s cubic-bezier(.2,.8,.2,1); color: #9aa4b2;
+  }
+  .icon-btn:hover { background: rgba(42,109,244,.2); border-color: rgba(42,109,244,.4); color: #fff; transform: scale(1.08); }
+  .icon-btn:active { transform: scale(.92); }
+
+  .empty { text-align: center; color: #4a505c; font-size: 12px; padding: 28px 0; }
+  .hint { font-size: 11px; color: #4a505c; text-align: center; margin-top: 18px; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(24px) scale(.95);
+    background: rgba(18,22,30,.95); backdrop-filter: blur(16px);
+    border: 1px solid rgba(42,109,244,.5); color: #fff;
+    padding: 10px 22px; border-radius: 10px; font-size: 12px;
+    opacity: 0; pointer-events: none; transition: all .35s cubic-bezier(.2,.8,.2,1);
+    box-shadow: 0 12px 40px rgba(0,0,0,.6), 0 0 30px rgba(42,109,244,.2);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+
+  @media (max-width: 560px) {
+    body { padding: 22px 12px; }
+    .card { padding: 26px 18px; border-radius: 18px; }
+    h1 { font-size: 21px; }
+    .scene .beam { display: none; }
   }
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>Delta Bypass</h1>
-  <label>粘贴 auth 链接或 ticket</label>
-  <input type="text" id="linkInput" placeholder="https://auth.platorelay.com/a?d=...">
-  <button id="solveBtn" onclick="solve()">解出 Key</button>
-  <pre id="result">等待操作...</pre>
+
+<div class="scene">
+  <div class="orb orb1"></div>
+  <div class="orb orb2"></div>
+  <div class="orb orb3"></div>
+  <div class="grid"></div>
+  <div class="beam b1"></div>
+  <div class="beam b2"></div>
+  <div class="beam b3"></div>
 </div>
 
+<div class="card">
+  <h1>Delta Bypass</h1>
+  <div class="subtitle">解指定链接 · 生成链接 · 生成并解</div>
+
+  <div class="tabs">
+    <div class="tab active" data-panel="solve">解指定</div>
+    <div class="tab" data-panel="gen">生成链接</div>
+  </div>
+
+  <div class="panel active" id="panel-solve">
+    <label>粘贴 auth 链接或 ticket</label>
+    <input type="text" id="solveInput" placeholder="https://auth.platorelay.com/a?d=...">
+    <div class="cf-turnstile" data-sitekey="你的SITE_KEY" data-callback="onTurnstileSuccess"></div>
+    <button id="solveBtn" class="primary" onclick="doSolve()" disabled>解出 Key</button>
+
+    <div class="result-header">
+      <h3>结果</h3>
+      <span class="clear-all" onclick="clearResults('solveResults')">Clear</span>
+    </div>
+    <div class="result-list" id="solveResults">
+      <div class="empty">还没有结果</div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-gen">
+    <label>生成数量</label>
+    <input type="number" id="genCount" value="1" min="1" max="50">
+    <div class="checkbox-group">
+      <label><input type="checkbox" id="autoSolve"> 生成后自动解</label>
+    </div>
+    <div class="cf-turnstile" data-sitekey="你的SITE_KEY" data-callback="onTurnstileSuccess"></div>
+    <button id="genBtn" class="primary" onclick="doGenerate()" disabled>开始</button>
+
+    <div class="result-header">
+      <h3>结果</h3>
+      <span class="clear-all" onclick="clearResults('genResults')">Clear</span>
+    </div>
+    <div class="result-list" id="genResults">
+      <div class="empty">还没有结果</div>
+    </div>
+  </div>
+
+  <div class="hint">完成上方验证码后按钮可用 · 点击内容可复制 · 结果自动复制</div>
+</div>
+
+<div class="toast" id="toast">已复制</div>
+
 <script>
-// ！！！把这里换成你的 Render 服务地址，注意不要带末尾斜杠 ！！！
 const API_BASE = "https://delta-bypass-mabf.onrender.com";
+let turnstileToken = null;
 
-async function solve() {
-  const url = document.getElementById("linkInput").value.trim();
-  const resultEl = document.getElementById("result");
-  const btn = document.getElementById("solveBtn");
+function onTurnstileSuccess(token) {
+  turnstileToken = token;
+  document.querySelectorAll('button.primary').forEach(b => b.disabled = false);
+}
 
-  if (!url) { alert("请输入链接"); return; }
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+  });
+});
 
-  resultEl.textContent = "处理中，首次请求可能需要唤醒服务，请稍候...";
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 1500);
+}
+
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); resolve(); } catch (e) { reject(e); }
+    document.body.removeChild(ta);
+  });
+}
+
+function addResult(containerId, { value, type, autoCopy = true }) {
+  const container = document.getElementById(containerId);
+  const empty = container.querySelector('.empty');
+  if (empty) empty.remove();
+
+  const idx = container.children.length + 1;
+  const item = document.createElement('div');
+  item.className = 'result-item';
+
+  const idxEl = document.createElement('span');
+  idxEl.className = 'idx';
+  idxEl.textContent = idx + '.';
+
+  const valEl = document.createElement('span');
+  valEl.className = 'value ' + type;
+  valEl.textContent = value;
+  valEl.title = value;
+  valEl.onclick = () => copyText(value).then(() => toast('已复制')).catch(() => toast('复制失败'));
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'icon-btn';
+  copyBtn.title = '复制';
+  copyBtn.textContent = '📋';
+  copyBtn.onclick = () => copyText(value).then(() => toast('已复制')).catch(() => toast('复制失败'));
+
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'icon-btn';
+  clearBtn.title = '清除';
+  clearBtn.textContent = '✕';
+  clearBtn.onclick = () => {
+    item.classList.add('removing');
+    setTimeout(() => {
+      item.remove();
+      if (!container.children.length) {
+        container.innerHTML = '<div class="empty">还没有结果</div>';
+      }
+    }, 250);
+  };
+
+  actions.appendChild(copyBtn);
+  actions.appendChild(clearBtn);
+  item.appendChild(idxEl);
+  item.appendChild(valEl);
+  item.appendChild(actions);
+  container.appendChild(item);
+
+  if (autoCopy && value) {
+    copyText(value).then(() => toast('已复制')).catch(() => {});
+  }
+}
+
+function clearResults(containerId) {
+  const c = document.getElementById(containerId);
+  c.innerHTML = '<div class="empty">还没有结果</div>';
+}
+
+async function doSolve() {
+  const url = document.getElementById('solveInput').value.trim();
+  if (!url) { alert('请输入链接'); return; }
+  if (!turnstileToken) { alert('请先完成验证码'); return; }
+
+  const btn = document.getElementById('solveBtn');
   btn.disabled = true;
 
   try {
-    const apiUrl = `${API_BASE}/delta?url=${encodeURIComponent(url)}`;
-    const res = await fetch(apiUrl);
+    const res = await fetch(`${API_BASE}/delta?url=${encodeURIComponent(url)}`);
     const data = await res.json();
-
     if (data.key) {
-      resultEl.textContent = `✅ Key: ${data.key}\n⏱ 用时: ${data.times}`;
+      addResult('solveResults', { value: data.key, type: 'key' });
     } else {
-      resultEl.textContent = `❌ 失败: ${data.error || "未知错误"}`;
+      addResult('solveResults', { value: data.error || '未知错误', type: 'error', autoCopy: false });
     }
   } catch (e) {
-    resultEl.textContent = `❌ 请求出错: ${e.message}\n\n可能原因：服务在休眠（等 30 秒重试），或 API 地址不正确。`;
+    addResult('solveResults', { value: '请求出错: ' + e.message, type: 'error', autoCopy: false });
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function doGenerate() {
+  const count = parseInt(document.getElementById('genCount').value) || 1;
+  const autoSolve = document.getElementById('autoSolve').checked;
+  if (!turnstileToken) { alert('请先完成验证码'); return; }
+
+  const btn = document.getElementById('genBtn');
+  btn.disabled = true;
+
+  try {
+    const gen = await fetch(`${API_BASE}/generate?count=${count}`);
+    const genData = await gen.json();
+
+    if (!genData.success || !genData.links) {
+      addResult('genResults', { value: genData.error || '生成失败', type: 'error', autoCopy: false });
+      return;
+    }
+
+    for (const link of genData.links) {
+      addResult('genResults', { value: link, type: 'link' });
+
+      if (autoSolve) {
+        try {
+          const res = await fetch(`${API_BASE}/delta?url=${encodeURIComponent(link)}`);
+          const data = await res.json();
+          if (data.key) {
+            addResult('genResults', { value: data.key, type: 'key' });
+          } else {
+            addResult('genResults', { value: data.error || '求解失败', type: 'error', autoCopy: false });
+          }
+        } catch (e) {
+          addResult('genResults', { value: '求解请求出错: ' + e.message, type: 'error', autoCopy: false });
+        }
+      }
+    }
+  } catch (e) {
+    addResult('genResults', { value: '请求出错: ' + e.message, type: 'error', autoCopy: false });
   } finally {
     btn.disabled = false;
   }
