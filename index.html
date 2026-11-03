@@ -1,26 +1,85 @@
-<input id="linkInput" placeholder="粘贴 Delta 链接">
-<button onclick="solve()">解出 Key</button>
-<pre id="result"></pre>
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Delta Bypass</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f1115; color: #e6e6e6;
+    display: flex; justify-content: center; align-items: flex-start;
+    min-height: 100vh; padding: 60px 16px;
+  }
+  .card {
+    width: 100%; max-width: 520px;
+    background: #181b22; border: 1px solid #262b36;
+    border-radius: 12px; padding: 28px;
+  }
+  h1 { font-size: 20px; font-weight: 600; text-align: center; margin-bottom: 24px; }
+  label { display: block; font-size: 12px; color: #9aa4b2; margin-bottom: 6px; }
+  input[type="text"] {
+    width: 100%; padding: 11px 12px; font-size: 14px;
+    background: #12151b; color: #e6e6e6;
+    border: 1px solid #262b36; border-radius: 8px; outline: none;
+    margin-bottom: 14px;
+  }
+  input:focus { border-color: #2a6df4; }
+  button {
+    width: 100%; padding: 12px 0; font-size: 14px; font-weight: 600;
+    color: #fff; background: #2a6df4; border: none; border-radius: 8px;
+    cursor: pointer; transition: .15s; margin-bottom: 16px;
+  }
+  button:hover { background: #1f5ae0; }
+  button:disabled { background: #3a3f4a; cursor: not-allowed; }
+  pre {
+    background: #12151b; border: 1px solid #262b36; border-radius: 8px;
+    padding: 12px; font-size: 12px; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-all;
+    min-height: 60px; color: #b8c0cc;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Delta Bypass</h1>
+  <label>粘贴 auth 链接或 ticket</label>
+  <input type="text" id="linkInput" placeholder="https://auth.platorelay.com/a?d=...">
+  <button id="solveBtn" onclick="solve()">解出 Key</button>
+  <pre id="result">等待操作...</pre>
+</div>
 
 <script>
-async function solve() {
-  const url = document.getElementById('linkInput').value;
-  const resultEl = document.getElementById('result');
-  resultEl.textContent = '处理中...';
+// ！！！把这里换成你的 Render 服务地址，注意不要带末尾斜杠 ！！！
+const API_BASE = "https://delta-bypass-mabf.onrender.com";
 
-  // 把 YOUR_APP 换成你 Render 服务的名字
-  const apiUrl = `https://delta-bypass-mabf.onrender.com//delta?url=${encodeURIComponent(url)}`;
-  
+async function solve() {
+  const url = document.getElementById("linkInput").value.trim();
+  const resultEl = document.getElementById("result");
+  const btn = document.getElementById("solveBtn");
+
+  if (!url) { alert("请输入链接"); return; }
+
+  resultEl.textContent = "处理中，首次请求可能需要唤醒服务，请稍候...";
+  btn.disabled = true;
+
   try {
+    const apiUrl = `${API_BASE}/delta?url=${encodeURIComponent(url)}`;
     const res = await fetch(apiUrl);
     const data = await res.json();
+
     if (data.key) {
-      resultEl.textContent = `Key: ${data.key}\n用时: ${data.times}`;
+      resultEl.textContent = `✅ Key: ${data.key}\n⏱ 用时: ${data.times}`;
     } else {
-      resultEl.textContent = `失败: ${data.error || '未知错误'}`;
+      resultEl.textContent = `❌ 失败: ${data.error || "未知错误"}`;
     }
   } catch (e) {
-    resultEl.textContent = '请求出错，服务可能正在唤醒，请稍后重试';
+    resultEl.textContent = `❌ 请求出错: ${e.message}\n\n可能原因：服务在休眠（等 30 秒重试），或 API 地址不正确。`;
+  } finally {
+    btn.disabled = false;
   }
 }
 </script>
+</body>
+</html>
