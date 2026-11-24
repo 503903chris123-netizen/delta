@@ -101,16 +101,17 @@
 
   /* ---------- Tabs ---------- */
   .tabs {
-    position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 5px; margin-bottom: 24px;
+    position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 5px; margin-bottom: 24px;
     background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px;
   }
   .tab-indicator {
-    position: absolute; top: 5px; bottom: 5px; left: 5px; width: calc(50% - 5px); border-radius: 10px;
+    position: absolute; top: 5px; bottom: 5px; left: 5px; width: calc(33.333% - 5px); border-radius: 10px;
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     box-shadow: 0 6px 22px rgba(91,140,255,.38);
     transition: transform .4s var(--ease);
   }
   .tabs[data-active="gen"] .tab-indicator { transform: translateX(100%); }
+  .tabs[data-active="bypass"] .tab-indicator { transform: translateX(200%); }
   .tab {
     position: relative; z-index: 1; padding: 11px 0; text-align: center; cursor: pointer;
     font-size: 13.5px; font-weight: 500; color: var(--muted); border: 0; background: none;
@@ -293,13 +294,14 @@
   <header>
     <div class="logo" aria-hidden="true">⚡</div>
     <h1>Delta Bypass</h1>
-    <div class="subtitle">解指定链接 · 生成链接 · 生成并解</div>
+    <div class="subtitle">解指定链接 · 生成链接 · Bypass 链接</div>
   </header>
 
   <div class="tabs" id="tabs" data-active="solve" role="tablist">
     <div class="tab-indicator"></div>
     <button class="tab active" role="tab" data-panel="solve">解指定</button>
     <button class="tab" role="tab" data-panel="gen">生成链接</button>
+    <button class="tab" role="tab" data-panel="bypass">Bypass 链接</button>
   </div>
 
   <!-- 解指定 -->
@@ -368,6 +370,36 @@
     <div class="summary" id="genSummary"></div>
   </section>
 
+  <!-- Bypass 链接（新增） -->
+  <section class="panel" id="panel-bypass">
+    <div class="field-label"><span>粘贴 Linkvertise / Lootlabs 链接，自动识别</span></div>
+    <div class="field">
+      <input type="text" id="bypassInput" placeholder="https://linkvertise.com/... 或 https://loot-link.com/..." autocomplete="off" spellcheck="false">
+      <div class="field-actions">
+        <button class="mini-btn" type="button" onclick="bypassPaste()">粘贴</button>
+        <button class="mini-btn" type="button" onclick="bypassClear()">清空</button>
+      </div>
+    </div>
+
+    <div class="verify">
+      <div class="cf-turnstile" data-sitekey="0x4AAAAAAFmM_2ZFDB9Bor0J" data-callback="onTurnstileSuccess"></div>
+      <span class="status-chip js-status">等待验证码</span>
+    </div>
+
+    <button id="bypassBtn" class="primary" onclick="doBypass()" disabled>
+      <span class="spinner"></span><span class="label">开始 Bypass</span>
+    </button>
+
+    <div class="result-header">
+      <h3>结果 <span class="count" id="bypassCount">0</span></h3>
+      <div class="header-btns">
+        <button class="ghost-btn" onclick="copyAll('bypassResults')">复制全部</button>
+        <button class="ghost-btn danger" onclick="clearResults('bypassResults')">Clear</button>
+      </div>
+    </div>
+    <div class="result-list" id="bypassResults"><div class="empty">还没有结果</div></div>
+  </section>
+
   <div class="hint">完成上方验证码后按钮可用 · 点击内容可复制 · 结果自动复制</div>
 </main>
 
@@ -378,7 +410,7 @@ const API_BASE = "https://delta-bypass-mabf.onrender.com";
 let turnstileToken = null;
 
 const EMPTY_HTML = '<div class="empty">还没有结果</div>';
-const COUNT_EL = { solveResults: 'solveCount', genResults: 'genCountBadge' };
+const COUNT_EL = { solveResults: 'solveCount', genResults: 'genCountBadge', bypassResults: 'bypassCount' };
 
 function onTurnstileSuccess(token) {
   turnstileToken = token;
@@ -683,6 +715,56 @@ async function doGenerate() {
     setLoading(btn, false, '开始');
   }
 }
+
+/* ===== 新增：Bypass Linkvertise / Lootlabs ===== */
+async function bypassPaste() {
+  try {
+    const t = await navigator.clipboard.readText();
+    document.getElementById('bypassInput').value = t.trim();
+    toast('已粘贴');
+  } catch { toast('无法读取剪贴板'); }
+}
+
+function bypassClear() {
+  document.getElementById('bypassInput').value = '';
+}
+
+document.getElementById('bypassInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !document.getElementById('bypassBtn').disabled) doBypass();
+});
+
+async function doBypass() {
+  const url = document.getElementById('bypassInput').value.trim();
+  if (!url) { toast('请输入链接'); document.getElementById('bypassInput').focus(); return; }
+  if (!turnstileToken) { toast('请先完成验证码'); return; }
+
+  const btn = document.getElementById('bypassBtn');
+  setLoading(btn, true, '解析中…');
+
+  const t0 = performance.now();
+  try {
+    const res = await fetch(`${API_BASE}/api/bypass`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    const ms = performance.now() - t0;
+
+    if (res.ok && data.destination) {
+      addResult('bypassResults', { value: data.destination, type: 'link', time: ms });
+      document.getElementById('bypassInput').value = '';
+    } else {
+      const msg = data.detail || data.message || ('请求失败 HTTP ' + res.status);
+      addResult('bypassResults', { value: msg, type: 'error', time: ms, autoCopy: false });
+    }
+  } catch (e) {
+    addResult('bypassResults', { value: '请求出错: ' + e.message, type: 'error', autoCopy: false });
+  } finally {
+    setLoading(btn, false, '开始 Bypass');
+  }
+}
+/* ===== 新增结束 ===== */
 </script>
 </body>
 </html>
