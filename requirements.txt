@@ -13,8 +13,13 @@ uvicorn>=0.23
 uvloop>=0.19; sys_platform != "win32"
 httptools>=0.6
 orjson>=3.9
+fastapi
+uvicorn
 requests
 websocket-client
 beautifulsoup4
 cryptography
 brotli
+orjson
+uvloop
+httptools
