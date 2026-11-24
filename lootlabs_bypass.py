@@ -1,6 +1,9 @@
 # lootlabs_bypass.py
-# LootLabs bypass —— 本地解码 &data= 参数 + WebSocket 任务链回退
-# 不经过任何第三方 bypass API
+# LootLabs bypass：
+#   策略 A：loot-reward.com/t?cc=  → 双层 Base64 解码直接拿 link（复用你提供的脚本逻辑）
+#   策略 B：links.lootlabs.gg/s?...&data=  → 尝试 XOR 混淆解码
+#   策略 C：普通任务链 → 页面/WebSocket 回退
+# 全程不调用任何第三方 bypass API
 
 import re
 import json
@@ -9,6 +12,7 @@ import base64
 import hashlib
 import random
 import string
+from urllib.parse import urlparse, parse_qs, unquote
 
 import requests
 from bs4 import BeautifulSoup
@@ -22,12 +26,77 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
 
+# ============================================================
+# 策略 A：loot-reward.com/t?cc= —— 复用你提供的解码逻辑
+# ============================================================
+
+def _add_padding(s: str) -> str:
+    return s + "=" * (-len(s) % 4)
+
+
+def _decode_cc(cc: str):
+    """双层 Base64 解码 cc 参数，返回 JSON 对象"""
+    cc = unquote(cc)
+    decoded1 = base64.urlsafe_b64decode(_add_padding(cc)).decode("utf-8", errors="strict")
+    if decoded1.startswith("{") or decoded1.startswith("["):
+        return json.loads(decoded1)
+    decoded2 = base64.b64decode(_add_padding(decoded1)).decode("utf-8")
+    return json.loads(decoded2)
+
+
+def _bypass_loot_reward(url: str):
+    """针对 loot-reward.com/t?cc= 链接：直接解码出 link 字段"""
+    parsed = urlparse(url)
+    if "loot-reward.com" not in (parsed.netloc or ""):
+        return None
+    params = parse_qs(parsed.query)
+    cc_values = params.get("cc")
+    if not cc_values:
+        return None
+
+    data = _decode_cc(cc_values[0])
+    link = data.get("link") if isinstance(data, dict) else None
+    if isinstance(link, str) and link.startswith("http"):
+        return link
+    return None
+
+
+# ============================================================
+# 策略 B：links.lootlabs.gg/s?...&data= —— XOR 混淆尝试
+# ============================================================
+
+def _decode_data_param(url: str):
+    data_match = re.search(r'[?&]data=([^&#]+)', url)
+    if not data_match:
+        return None
+    raw = data_match.group(1)
+    try:
+        raw_fixed = raw.replace('+', '%2B')
+        raw_decoded = requests.utils.unquote(raw_fixed)
+        padded = raw_decoded + "=" * (-len(raw_decoded) % 4)
+        decoded_bytes = base64.b64decode(padded)
+        if len(decoded_bytes) <= 5:
+            return None
+        prefix = decoded_bytes[:5]
+        payload = decoded_bytes[5:]
+        plain = bytes(payload[i] ^ prefix[i % len(prefix)] for i in range(len(payload)))
+        candidate = plain.decode("utf-8", errors="ignore")
+        if candidate.startswith("http") and "lootlabs" not in candidate:
+            return candidate
+    except Exception:
+        pass
+    return None
+
+
+# ============================================================
+# 策略 C：普通任务链 —— BotD + WebSocket / 页面搜索
+# ============================================================
+
 def _rand_id(n=16):
     return "".join(random.choices(string.ascii_letters + string.digits, k=n))
 
 
 def _botd_payload(site_key: str) -> str:
-    """构造 BotD 伪造载荷，用于 WebSocket 回退策略"""
     if AESGCM is None:
         return ""
     key = hashlib.sha256(site_key.encode()).digest()
@@ -47,65 +116,16 @@ def _extract_task_id(url: str) -> str:
     return url.rstrip("/").split("/")[-1].split("?")[0]
 
 
-def _decode_data_param(url: str):
-    """
-    尝试本地解码 &data= 参数（XOR 混淆）。
-    逻辑来自公开的 LootLabs 绕过脚本，Base64 解码后取前 5 字符作为 XOR 前缀。
-    解码成功返回 URL 字符串，失败返回 None。
-    """
-    data_match = re.search(r'[?&]data=([^&#]+)', url)
-    if not data_match:
-        return None
-
-    raw = data_match.group(1)
-    try:
-        # URL 解码后 Base64 解码（补 padding）
-        raw = requests.utils.unquote(raw)
-        padded = raw + "=" * (-len(raw) % 4)
-        decoded_bytes = base64.b64decode(padded)
-
-        if len(decoded_bytes) <= 5:
-            return None
-
-        prefix = decoded_bytes[:5]          # 前 5 字节作为 XOR 密钥
-        payload = decoded_bytes[5:]         # 剩余部分为密文
-
-        plain = bytes(
-            payload[i] ^ prefix[i % len(prefix)]
-            for i in range(len(payload))
-        )
-        candidate = plain.decode("utf-8", errors="ignore")
-
-        if candidate.startswith("http") and "lootlabs" not in candidate:
-            return candidate
-    except Exception:
-        pass
-    return None
-
-
-def getDest(url: str, timeout: int = 25) -> str:
-    """
-    传入 LootLabs 链接，返回最终目标 URL。
-    优先尝试 &data= 本地解码；失败则回退到 WebSocket 任务链解析。
-    失败时抛出 ValueError。
-    """
-    # ---------- 策略 0：直接解码 &data= 参数（最高优先级） ----------
-    decoded = _decode_data_param(url)
-    if decoded:
-        return decoded
-
-    # ---------- 策略 1：获取页面，尝试 WebSocket 任务链 ----------
+def _bypass_task_chain(url: str, timeout: int = 25):
     session = requests.Session()
     session.headers.update({"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"})
-
     try:
         resp = session.get(url, timeout=timeout, allow_redirects=True)
         resp.raise_for_status()
         html = resp.text
-    except Exception as e:
-        raise ValueError(f"无法获取页面内容: {e}")
+    except Exception:
+        return None
 
-    # 尝试寻找 WebSocket 端点并通信
     ws_match = re.search(r'(wss?://[^\s"\']+)', html)
     if ws_match:
         ws_url = ws_match.group(1)
@@ -113,7 +133,6 @@ def getDest(url: str, timeout: int = 25) -> str:
         site_key_match = re.search(r'data-sitekey="([^"]+)"', html)
         site_key = site_key_match.group(1) if site_key_match else ""
         token = _botd_payload(site_key)
-
         try:
             import websocket
             ws = websocket.create_connection(ws_url, timeout=timeout)
@@ -123,15 +142,13 @@ def getDest(url: str, timeout: int = 25) -> str:
             }))
             raw_resp = ws.recv()
             ws.close()
-
             data = json.loads(raw_resp)
             dest = data.get("destination") or data.get("dest") or data.get("url")
             if isinstance(dest, str) and dest.startswith("http"):
                 return dest
         except Exception:
-            pass  # WebSocket 失败，继续往下
+            pass
 
-    # ---------- 策略 2：在页面 HTML 中搜索目的地 ----------
     for pattern in [
         r'"destination"\s*:\s*"([^"]+)"',
         r'"dest"\s*:\s*"([^"]+)"',
@@ -142,8 +159,48 @@ def getDest(url: str, timeout: int = 25) -> str:
             cand = m.group(1).replace("\\/", "/")
             if cand.startswith("http") and "lootlabs" not in cand:
                 return cand
+    return None
+
+
+# ============================================================
+# 统一入口（bypass_service.py 只依赖这个函数）
+# ============================================================
+
+def getDest(url: str, timeout: int = 25) -> str:
+    """
+    依次尝试：
+      A. loot-reward.com/t?cc=     → 双层 Base64 解码
+      B. ...&data=                 → XOR 混淆解码
+      C. 其他                       → WebSocket / 页面搜索
+    失败时抛 ValueError。
+    """
+    # A
+    if "loot-reward.com" in url:
+        try:
+            dest = _bypass_loot_reward(url)
+            if dest:
+                return dest
+        except Exception:
+            pass
+
+    # B
+    if "&data=" in url or "?data=" in url:
+        try:
+            dest = _decode_data_param(url)
+            if dest:
+                return dest
+        except Exception:
+            pass
+
+    # C
+    try:
+        dest = _bypass_task_chain(url, timeout=timeout)
+        if dest:
+            return dest
+    except Exception:
+        pass
 
     raise ValueError(
-        "LootLabs 解析失败：&data 本地解码未成功，WebSocket/页面搜索也未找到有效目标。"
-        "该链接可能使用了非标准混淆或更强的 BotD 校验。"
+        "LootLabs 解析失败："
+        "A) cc 参数解码失败；B) data 参数无法解码；C) 页面未暴露目标链接。"
     )
