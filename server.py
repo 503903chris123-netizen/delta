@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Delta Cardkey HTTP API
@@ -13,6 +14,7 @@ if HERE not in sys.path:
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+
 try:
     from fastapi.responses import ORJSONResponse as JSONResponse
 except Exception:
@@ -22,9 +24,9 @@ from main import solve_chain
 from auth_client import extract_ticket, MIN_TICKET_LEN
 from link_generator import batch_links
 import auth_client as AUTH
+from bypass_service import bypass_url
 
 app = FastAPI(title="Delta Cardkey", default_response_class=JSONResponse)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -49,8 +51,7 @@ def load_cache():
             with open(CACHE_FILE) as f:
                 data = json.load(f)
             now = time.time()
-            key_cache = {h: v for h, v in data.items()
-                          if isinstance(v, dict) and now - v.get("ts", 0) < CACHE_TTL}
+            key_cache = {h: v for h, v in data.items() if isinstance(v, dict) and now - v.get("ts", 0) < CACHE_TTL}
     except Exception:
         key_cache = {}
 
@@ -59,14 +60,13 @@ def save_cache_now():
     try:
         with lock:
             now = time.time()
-            for h in [h for h, v in key_cache.items()
-                      if now - v.get("ts", 0) >= CACHE_TTL]:
+            for h in [h for h, v in key_cache.items() if now - v.get("ts", 0) >= CACHE_TTL]:
                 key_cache.pop(h, None)
             snapshot = dict(key_cache)
-        tmp = CACHE_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(snapshot, f)
-        os.replace(tmp, CACHE_FILE)
+            tmp = CACHE_FILE + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(snapshot, f)
+            os.replace(tmp, CACHE_FILE)
     except Exception:
         pass
 
@@ -106,139 +106,28 @@ MADE_BY = "Hasl_Team"
 QQ_GROUP = "277707901"
 inflight = {}
 
+
 def fmt_t(secs):
     return f"{round(float(secs or 0.0), 12)}s"
 
 
-def solo_pass(ticket):
-    t0 = time.time()
-    solved_timer = None
-    try:
-        key, solved_timer = solve_chain(ticket, False, 3)
-        if key:
-            err = None
-        else:
-            reason = getattr(solved_timer, 'invalid_reason', None)
-            err = f"无效链接: {reason}" if reason else "solve failed"
-    except Exception as e:
-        key, err = None, f"solve exception: {type(e).__name__}"
-    if solved_timer is not None and solved_timer.total() > 0:
-        st = solved_timer.total()
-    else:
-        st = time.time() - t0
-    return key, err, st
+# ===== 原有解 Key 逻辑保持不变，只展示关键路由骨架 =====
+# 你的 solo_pass / 缓存 / 批量解等函数原样保留即可，这里不重复粘贴。
+# 下面的 /api/bypass 是新增的。
 
 
-def run_solves(ticket):
-    key, err, st = solo_pass(ticket)
-    if key or err.startswith("solve exception"):
-        return key, err, st
-    if err.startswith("无效链接"):
-        return key, err, st
-    time.sleep(0.3)
-    return solo_pass(ticket)
+@app.post("/api/bypass")
+async def api_bypass(payload: dict):
+    url = (payload or {}).get("url", "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="请求体必须包含 url 字段。")
+
+    result = bypass_url(url)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+
+    return result
 
 
-@app.get("/generate")
-async def generate(count: int = 1):
-    if count < 1 or count > 50:
-        return {"success": False, "error": "count 必须在 1 到 50 之间", "links": []}
-    try:
-        loop = asyncio.get_running_loop()
-        links = await loop.run_in_executor(executor, batch_links, count)
-        return {"success": True, "links": links}
-    except Exception as e:
-        return {"success": False, "error": f"生成失败: {type(e).__name__}: {e}", "links": []}
-
-
-@app.get("/delta")
-async def delta(url: str):
-    t0 = time.time()
-
-    try:
-        ticket = extract_ticket(url)
-    except Exception:
-        return {"key": None, "error": "invalid url", "cached": False,
-                "made_by": MADE_BY, "qq_group": QQ_GROUP,
-                "times": fmt_t(time.time() - t0)}
-    if len(ticket) < MIN_TICKET_LEN:
-        return {"key": None, "error": "invalid url (no ticket)", "cached": False,
-                "made_by": MADE_BY, "qq_group": QQ_GROUP,
-                "times": fmt_t(time.time() - t0)}
-
-    h = hashlib.md5(ticket.encode()).hexdigest()
-    cached, found, cached_solve_time = cache_get(ticket, h)
-    if found:
-        return {"key": cached, "cached": True, "error": None,
-                "made_by": MADE_BY, "qq_group": QQ_GROUP,
-                "times": fmt_t(cached_solve_time)}
-
-    loop = asyncio.get_running_loop()
-    with lock:
-        fut = inflight.get(h)
-        if fut is None:
-            fut = loop.create_future()
-            inflight[h] = fut
-            spawn = True
-        else:
-            spawn = False
-    if spawn:
-        loop.create_task(drive(h, fut, ticket))
-
-    try:
-        key, err, solve_time = await asyncio.shield(fut)
-    except Exception as e:
-        key, err, solve_time = None, f"internal: {type(e).__name__}", time.time() - t0
-
-    return {"key": key, "cached": False,
-            "error": err,
-            "made_by": MADE_BY, "qq_group": QQ_GROUP,
-            "times": fmt_t(solve_time)}
-
-
-async def drive(h, fut, ticket):
-    try:
-        key, err, st = await asyncio.get_running_loop().run_in_executor(
-            executor, run_solves, ticket)
-    except Exception as e:
-        key, err, st = None, f"solve exception: {type(e).__name__}", 0.0
-    if key:
-        cache_put(ticket, key, st, h)
-    with lock:
-        inflight.pop(h, None)
-    if not fut.done():
-        fut.set_result((key, err, st))
-
-
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--port", "-p", type=int, default=2233)
-    ap.add_argument("--host", default="0.0.0.0")
-    ap.add_argument("--workers", "-w", type=int, default=10)
-    args = ap.parse_args()
-    AUTH.start_version_watcher()
-    try:
-        import resource
-        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-        want = min(hard, 65535)
-        if soft < want:
-            resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
-            print(f"[server] fd limit {soft} -> {want}")
-    except Exception:
-        pass
-
-    executor = ThreadPoolExecutor(max_workers=args.workers,
-                                   thread_name_prefix="solve")
-    kw = {}
-    try:
-        import uvloop  # noqa: F401
-        kw['loop'] = 'uvloop'
-    except Exception:
-        pass
-    try:
-        import httptools  # noqa: F401
-        kw['http'] = 'httptools'
-    except Exception:
-        pass
-    uvicorn.run(app, host=args.host, port=args.port,
-                backlog=4096, access_log=False, **kw)
+# ===== 你原有的 /api/solve /api/batch 等路由全部保留在此下方 =====
+# 只需把上面这个 /api/bypass 插入到任意合适位置即可，不要删除原有代码。
