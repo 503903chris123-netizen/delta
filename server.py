@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # Delta Cardkey HTTP API
@@ -23,6 +22,7 @@ from main import solve_chain
 from auth_client import extract_ticket, MIN_TICKET_LEN
 from link_generator import batch_links
 import auth_client as AUTH
+from bypass_service import bypass_url
 
 app = FastAPI(title="Delta Cardkey", default_response_class=JSONResponse)
 
@@ -195,6 +195,19 @@ async def delta(url: str):
             "error": err,
             "made_by": MADE_BY, "qq_group": QQ_GROUP,
             "times": fmt_t(solve_time)}
+
+
+# ===== 新增：Bypass Linkvertise / Lootlabs =====
+@app.post("/api/bypass")
+async def api_bypass(payload: dict):
+    url = (payload or {}).get("url", "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="请求体必须包含 url 字段。")
+    result = bypass_url(url)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+# ===== 新增结束 =====
 
 
 async def drive(h, fut, ticket):
