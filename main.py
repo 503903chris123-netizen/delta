@@ -6,6 +6,7 @@ import os
 import time
 import argparse
 import threading
+from bypass_service import bypass_url
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
